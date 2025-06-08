@@ -94,32 +94,33 @@ namespace SimpletonChessEngine
         {
             if (parts.Length < 2) return;
 
-            Console.Error.WriteLine($"[DEBUG] HandlePosition: {string.Join(" ", parts)}");
+            Console.WriteLine($"info string HandlePosition: {string.Join(" ", parts)}");
 
             if (parts[1] == "startpos")
             {
-                // NE resetuj uvek - samo ako nema moves
+                // UVEK resetuj na početnu poziciju
+                engine.NewGame();
+                Console.WriteLine("info string Reset to starting position");
+
+                // Check for moves
                 int movesIndex = Array.IndexOf(parts, "moves");
-
-                if (movesIndex <= 0)
+                if (movesIndex > 0 && movesIndex < parts.Length - 1)
                 {
-                    // Nema poteza, resetuj
-                    engine.NewGame();
-                    Console.Error.WriteLine("[DEBUG] No moves, resetting game");
-                }
-                else
-                {
-                    // Ima poteze, resetuj i primeni sve
-                    engine.NewGame();
-                    Console.Error.WriteLine($"[DEBUG] Found moves starting at index {movesIndex}");
+                    Console.WriteLine($"info string Found {parts.Length - movesIndex - 1} moves to apply");
 
+                    // Primeni SVE poteze redom
                     for (int i = movesIndex + 1; i < parts.Length; i++)
                     {
-                        Console.Error.WriteLine($"[DEBUG] Applying move: {parts[i]}");
+                        Console.WriteLine($"info string Applying move {i - movesIndex}: {parts[i]}");
                         engine.MakeMove(parts[i]);
                     }
                 }
+                else
+                {
+                    Console.WriteLine("info string No moves found - starting position");
+                }
             }
+
         }
 
         private void HandleGo(string[] parts)

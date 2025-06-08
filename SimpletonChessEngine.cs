@@ -74,55 +74,60 @@ namespace SimpletonChessEngine
             }
         }
 
-        // Core engine methods
         public string GetBestMove(string position = null)
         {
+            Console.WriteLine("info string DEBUG TEST - GetBestMove called");
+            Console.WriteLine("info string About to show board state...");
+
+
             try
             {
-                Console.Error.WriteLine("[DEBUG] GetBestMove called");
-
+                Console.WriteLine("info string ChessEngine.GetBestMove called");
                 if (!string.IsNullOrEmpty(position))
                 {
                     gameState.SetPosition(position);
                 }
 
-                Console.Error.WriteLine("[DEBUG] Calling FindBestMove...");
+
                 var bestMove = searchAlgorithm.FindBestMove(gameState, depthLimit: 3);
-                Console.Error.WriteLine($"[DEBUG] FindBestMove returned: {bestMove?.ToString() ?? "null"}");
 
                 if (bestMove == null)
                 {
-                    Console.Error.WriteLine("[DEBUG] bestMove is null, using fallback");
+                    Console.WriteLine("info string bestMove is null, using fallback");
                     return "e2e4";
                 }
 
                 string result = bestMove.ToString();
-                Console.Error.WriteLine($"[DEBUG] Move string: '{result}'");
+                Console.WriteLine($"info string GetBestMove returning: {result}");
 
                 if (string.IsNullOrEmpty(result))
                 {
-                    Console.Error.WriteLine("[DEBUG] Empty result, using fallback");
+                    Console.WriteLine("info string Empty result, using fallback");
                     return "e2e4";
                 }
 
-                // NE dodavaj engine move u state ovde - to će GUI uraditi u sledećem position command
-                Console.Error.WriteLine($"[DEBUG] Returning: '{result}'");
                 return result;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[DEBUG] Exception in GetBestMove: {ex.Message}");
-                Console.Error.WriteLine($"[DEBUG] StackTrace: {ex.StackTrace}");
+                Console.WriteLine($"info string Exception in GetBestMove: {ex.Message}");
+                Console.WriteLine($"info string StackTrace: {ex.StackTrace}");
                 return "e2e4";
             }
         }
 
+
         public void MakeMove(string move)
         {
             var parsedMove = Move.Parse(move);
-            if (gameState.IsLegalMove(parsedMove))
+            if (parsedMove != null)
             {
+                // DIREKTNO PRIMENI - GUI šalje samo legalne poteze!
                 gameState.MakeMove(parsedMove);
+            }
+            else
+            {
+                Console.WriteLine($"info string ERROR: Failed to parse move '{move}'");
             }
         }
 
@@ -149,61 +154,5 @@ namespace SimpletonChessEngine
         // Generiši sve legalne poteze
     }
 
-    public class Evaluator
-    {
-        public int Evaluate(GameState position)
-        {
-            // Evaluacija pozicije (material, pozicija, itd.)
-            return 0;
-        }
-    }
-
-    public class SearchAlgorithm
-    {
-        private readonly Evaluator evaluator;
-
-        public SearchAlgorithm(Evaluator evaluator)
-        {
-            this.evaluator = evaluator;
-        }
-
-        public Move FindBestMove(GameState position, int depthLimit)
-        {
-            try
-            {
-                Console.Error.WriteLine("[DEBUG] FindBestMove starting...");
-
-                int moveCount = position.GetMoveCount();
-                bool isWhiteToMove = (moveCount % 2 == 0);
-
-                Console.Error.WriteLine($"[DEBUG] Move count: {moveCount}, White to move: {isWhiteToMove}");
-
-                // Različiti potezi za beli i crni
-                if (isWhiteToMove)
-                {
-                    // Beli potezi
-                    string[] moves = { "e2e4", "d2d4", "g1f3", "b1c3" };
-                    Random rand = new Random();
-                    string move = moves[rand.Next(moves.Length)];
-                    Console.Error.WriteLine($"[DEBUG] White move: {move}");
-                    return Move.Parse(move);
-                }
-                else
-                {
-                    // Crni potezi - odgovori na beli potez
-                    string[] moves = { "e7e5", "d7d5", "g8f6", "b8c6" };
-                    Random rand = new Random();
-                    string move = moves[rand.Next(moves.Length)];
-                    Console.Error.WriteLine($"[DEBUG] Black move: {move}");
-                    return Move.Parse(move);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[DEBUG] Exception: {ex.Message}");
-                return Move.Parse("e2e4");
-            }
-        }
-    }
 
 }
