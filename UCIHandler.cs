@@ -12,6 +12,11 @@ namespace SimpletonChessEngine
         private readonly SimpletonChessEngine engine;
         private bool debugMode = false;
 
+        private CancellationTokenSource searchCancellation;
+        private Task searchTask;
+        private volatile bool stopSearch = false;  
+
+
         public UCIHandler(SimpletonChessEngine engine)
         {
             this.engine = engine;
@@ -74,6 +79,8 @@ namespace SimpletonChessEngine
                     break;
 
                 case "stop":
+                    Console.WriteLine("info string STOP COMMAND RECEIVED!");
+                    stopSearch = true;
                     break;
 
                 case "quit":
@@ -127,21 +134,29 @@ namespace SimpletonChessEngine
         {
             try
             {
-                Console.Error.WriteLine("[DEBUG] Starting search...");
-                string bestMove = engine.GetBestMove();
-                Console.Error.WriteLine($"[DEBUG] Found move: {bestMove}");
+                stopSearch = false; // resetuj flag
+                Console.WriteLine("info string STARTING ASYNC SEARCH");
 
-                if (string.IsNullOrEmpty(bestMove) || bestMove == "null")
+                // Pokreni search asinhrono
+                searchTask = Task.Run(() =>
                 {
-                    bestMove = "e2e4"; // Hard fallback
-                }
+                    Console.WriteLine("info string INSIDE TASK");
+                    string bestMove = engine.GetBestMove(); // pozovi normalno
 
-                Console.WriteLine($"bestmove {bestMove}");
+                    if (!stopSearch) // pošalji rezultat samo ako nije prekidano
+                    {
+                        Console.WriteLine($"bestmove {bestMove}");
+                    }
+                    else
+                    {
+                        Console.WriteLine("info string SEARCH WAS STOPPED, NOT SENDING BESTMOVE");
+                    }
+                });
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"[DEBUG] Search error: {ex.Message}");
-                Console.WriteLine("bestmove e2e4"); // Safe fallback
+                Console.WriteLine("bestmove e2e4");
             }
         }
     }

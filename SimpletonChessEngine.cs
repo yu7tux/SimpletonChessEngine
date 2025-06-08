@@ -8,6 +8,7 @@ namespace SimpletonChessEngine
 {
     public class SimpletonChessEngine
     {
+        public volatile bool ShouldStop = false;
         private readonly GameState gameState;
         private readonly MoveGenerator moveGenerator;
         private readonly Evaluator evaluator;
@@ -89,7 +90,7 @@ namespace SimpletonChessEngine
                 }
 
 
-                var bestMove = searchAlgorithm.FindBestMove(gameState, depthLimit: 3);
+                var bestMove = searchAlgorithm.FindBestMove(gameState, depthLimit: 3, shouldStop: () => ShouldStop);
 
                 if (bestMove == null)
                 {
@@ -146,13 +147,4 @@ namespace SimpletonChessEngine
             return gameState.IsCheckmate() || gameState.IsStalemate() || gameState.IsDraw();
         }
     }
-
-    // Dummy classes - implementiraj prema potrebi
-   
-    public class MoveGenerator
-    {
-        // Generiši sve legalne poteze
-    }
-
-
 }

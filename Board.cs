@@ -62,10 +62,6 @@ namespace SimpletonChessEngine
 
         public Board(Board other)
         {
-            Console.WriteLine($"info string Board copy constructor called");
-            Console.WriteLine($"info string Source board whiteToMove: {other.whiteToMove}");
-
-
             Array.Copy(other.Squares, this.Squares, 64);
 
             for (int rank = 0; rank < 8; rank++)
@@ -82,8 +78,6 @@ namespace SimpletonChessEngine
             this.BlackCanCastleKingside = other.BlackCanCastleKingside;
             this.BlackCanCastleQueenside = other.BlackCanCastleQueenside;
             this.enPassantSquare = other.enPassantSquare;
-
-            Console.WriteLine($"info string Board copied: whiteToMove = {this.whiteToMove}");
         }
 
         private void SetupStartingPosition()
@@ -124,11 +118,6 @@ namespace SimpletonChessEngine
 
         public void MakeMove(ChessMove move)
         {
-            Console.WriteLine($"info string === Board.MakeMove DEBUG ===");
-            Console.WriteLine($"info string Move: {move.ToAlgebraic()}");
-            Console.WriteLine($"info string BEFORE: whiteToMove = {whiteToMove}");
-            Console.WriteLine($"info string Expected: After this move, turn should switch to {(!whiteToMove ? "WHITE" : "BLACK")}");
-
             int piece = GetPiece(move.FromFile, move.FromRank);
             int capturedPiece = GetPiece(move.ToFile, move.ToRank);
 
@@ -225,9 +214,6 @@ namespace SimpletonChessEngine
 
             // Switch turns
             whiteToMove = !whiteToMove;
-
-            Console.WriteLine($"info string AFTER: whiteToMove = {whiteToMove}");
-            Console.WriteLine($"info string === Board.MakeMove END ===");
         }
 
         public List<ChessMove> GenerateLegalMoves()
@@ -235,41 +221,18 @@ namespace SimpletonChessEngine
             var pseudoLegalMoves = GeneratePseudoLegalMoves();
             var legalMoves = new List<ChessMove>();
 
-            // Samo ključni debug
-            Console.WriteLine($"info string Filtering {pseudoLegalMoves.Count} pseudo-legal moves");
-            Console.WriteLine($"info string GenerateLegalMoves START - whiteToMove: {whiteToMove}");
-
             foreach (var move in pseudoLegalMoves)
             {
-                // Optimizovan test - napravi potez, testiraj, vrati potez
-                ////MakeMove(move);
-                ////bool kingInCheck = IsInCheck(!whiteToMove); // Obrnuto jer je potez već napravljen
-                ////UndoMove(move); // DODAJ undo metodu umesto kopiranja!
-                ///
                 var testBoard = new Board(this);
-                Console.WriteLine($"info string Created test board copy - testBoard.whiteToMove: {testBoard.IsWhiteToMove()}, original.whiteToMove: {whiteToMove}");
-
                 testBoard.MakeMove(move);
-                Console.WriteLine($"info string After test move - testBoard.whiteToMove: {testBoard.IsWhiteToMove()}, original.whiteToMove: {whiteToMove}");
-
-                //bool kingInCheck = testBoard.IsInCheck(!this.whiteToMove);
                 bool kingInCheck = testBoard.IsInCheck(this.whiteToMove);
 
                 if (!kingInCheck)
                 {
                     legalMoves.Add(move);
                 }
-
-                Console.WriteLine($"info string After legality test - original.whiteToMove: {whiteToMove}");
-
-                //if (!kingInCheck)
-                //{
-                //    legalMoves.Add(move);
-                //}
             }
 
-            Console.WriteLine($"info string {legalMoves.Count} legal moves found");
-            Console.WriteLine($"info string GenerateLegalMoves END - whiteToMove: {whiteToMove}");
             return legalMoves;
         }
 
@@ -289,47 +252,6 @@ namespace SimpletonChessEngine
             // NAPOMENA: Ovo je jednostavna verzija
             // Pravi undo bi trebao da vrati castling rights, en passant, itd.
         }
-
-        //public bool IsInCheck(bool whiteKing)
-        //{
-        //    // Nađi poziciju kralja
-        //    int kingFile = -1, kingRank = -1;
-        //    int targetKing = whiteKing ? WHITE_KING : BLACK_KING;
-
-        //    for (int rank = 0; rank < 8; rank++)
-        //    {
-        //        for (int file = 0; file < 8; file++)
-        //        {
-        //            if (GetPiece(file, rank) == targetKing)
-        //            {
-        //                kingFile = file;
-        //                kingRank = rank;
-        //                break;
-        //            }
-        //        }
-        //        if (kingFile != -1) break;
-        //    }
-
-        //    if (kingFile == -1)
-        //    {
-        //        Console.WriteLine($"info string ERROR: {(whiteKing ? "White" : "Black")} king not found!");
-        //        return false;
-        //    }
-
-        //    Console.WriteLine($"info string {(whiteKing ? "White" : "Black")} king at {(char)('a' + kingFile)}{kingRank + 1}");
-
-        //    // Proveri da li neki protivnički piece napada kralja
-        //    bool inCheck = IsSquareAttackedBy(!whiteKing, kingFile, kingRank);
-
-        //    if (inCheck)
-        //    {
-        //        Console.WriteLine($"info string {(whiteKing ? "White" : "Black")} king is in CHECK!");
-        //    }
-
-        //    return inCheck;
-        //}
-
-
 
         public bool IsInCheck(bool whiteKing)
         {
@@ -353,40 +275,9 @@ namespace SimpletonChessEngine
 
             if (kingFile == -1) return false;
 
-            // Bez debug output-a za brzinu
+
             return IsSquareAttackedBy(!whiteKing, kingFile, kingRank);
         }
-
-
-        //public bool IsSquareAttackedBy(bool byWhite, int targetFile, int targetRank)
-        //{
-        //    Console.WriteLine($"info string Checking if {(char)('a' + targetFile)}{targetRank + 1} is attacked by {(byWhite ? "White" : "Black")}");
-
-        //    // Proveri napade svih protivničkih figura
-        //    for (int rank = 0; rank < 8; rank++)
-        //    {
-        //        for (int file = 0; file < 8; file++)
-        //        {
-        //            int piece = GetPiece(file, rank);
-        //            if (piece == EMPTY) continue;
-
-        //            bool isPieceWhite = piece > 0;
-        //            if (isPieceWhite != byWhite) continue;
-
-        //            PieceType pieceType = (PieceType)Math.Abs(piece);
-
-        //            if (CanPieceAttackSquare(pieceType, file, rank, targetFile, targetRank))
-        //            {
-        //                Console.WriteLine($"info string {(char)('a' + file)}{rank + 1} {pieceType} attacks {(char)('a' + targetFile)}{targetRank + 1}");
-        //                return true;
-        //            }
-        //        }
-        //    }
-
-        //    return false;
-        //}
-
-
 
         public bool IsSquareAttackedBy(bool byWhite, int targetFile, int targetRank)
         {
@@ -483,52 +374,43 @@ namespace SimpletonChessEngine
         private void GenerateSlidingMoves(int file, int rank, List<ChessMove> moves, int[,] directions)
         {
             int piece = GetPiece(file, rank);
-            Console.WriteLine($"info string Generating sliding moves from {(char)('a' + file)}{rank + 1}, piece={piece}");
 
             for (int d = 0; d < directions.GetLength(0); d++)
             {
                 int df = directions[d, 0];
                 int dr = directions[d, 1];
-                Console.WriteLine($"info string Direction {d}: df={df}, dr={dr}");
 
                 for (int i = 1; i < 8; i++)
                 {
                     int newFile = file + i * df;
                     int newRank = rank + i * dr;
 
-                    Console.WriteLine($"info string Step {i}: trying {(char)('a' + newFile)}{newRank + 1}");
 
                     if (newFile < 0 || newFile > 7 || newRank < 0 || newRank > 7)
                     {
-                        Console.WriteLine($"info string Out of bounds, stopping direction");
                         break;
                     }
 
                     int target = GetPiece(newFile, newRank);
-                    Console.WriteLine($"info string {(char)('a' + newFile)}{newRank + 1} contains piece={target}");
 
                     if (target == EMPTY)
                     {
-                        Console.WriteLine($"info string Adding move: {(char)('a' + file)}{rank + 1}{(char)('a' + newFile)}{newRank + 1}");
                         moves.Add(new ChessMove(file, rank, newFile, newRank));
                     }
                     else
                     {
                         bool targetIsWhite = target > 0;
                         bool pieceIsWhite = piece > 0;
-                        Console.WriteLine($"info string Found piece: target={target} (white={targetIsWhite}), moving piece={piece} (white={pieceIsWhite})");
 
                         if (targetIsWhite != pieceIsWhite) // Capture
                         {
-                            Console.WriteLine($"info string Adding capture: {(char)('a' + file)}{rank + 1}x{(char)('a' + newFile)}{newRank + 1}");
                             moves.Add(new ChessMove(file, rank, newFile, newRank));
                         }
-                        else
-                        {
-                            Console.WriteLine($"info string Blocked by own piece");
-                        }
+                        //else
+                        //{
+                        //    Console.WriteLine($"info string Blocked by own piece");
+                        //}
 
-                        Console.WriteLine($"info string Stopping in this direction");
                         break;
                     }
                 }
@@ -580,29 +462,19 @@ namespace SimpletonChessEngine
 
             // Castling - dodaj debug
             bool isWhite = piece > 0;
-            Console.WriteLine($"info string Checking castling for {(isWhite ? "White" : "Black")} king at {(char)('a' + file)}{rank + 1}");
-            Console.WriteLine($"info string King in check: {IsInCheck(isWhite)}");
 
             if (IsInCheck(isWhite))
             {
-                Console.WriteLine("info string Cannot castle - king in check");
                 return;
             }
 
             // White castling
             if (piece == WHITE_KING && rank == 0 && file == 4)
             {
-                Console.WriteLine($"info string White castling rights: Kingside={WhiteCanCastleKingside}, Queenside={WhiteCanCastleQueenside}");
 
                 // Kingside castling (e1-g1)
                 if (WhiteCanCastleKingside)
                 {
-                    Console.WriteLine("info string Checking white kingside castling...");
-                    Console.WriteLine($"info string f1 empty: {GetPiece(5, 0) == EMPTY}");
-                    Console.WriteLine($"info string g1 empty: {GetPiece(6, 0) == EMPTY}");
-                    Console.WriteLine($"info string f1 attacked: {IsSquareAttackedBy(false, 5, 0)}");
-                    Console.WriteLine($"info string g1 attacked: {IsSquareAttackedBy(false, 6, 0)}");
-
                     if (GetPiece(5, 0) == EMPTY &&
                         GetPiece(6, 0) == EMPTY &&
                         !IsSquareAttackedBy(false, 5, 0) &&
@@ -616,18 +488,12 @@ namespace SimpletonChessEngine
                 // Queenside castling (e1-c1)
                 if (WhiteCanCastleQueenside)
                 {
-                    Console.WriteLine("info string Checking white queenside castling...");
-                    Console.WriteLine($"info string d1 empty: {GetPiece(3, 0) == EMPTY}");
-                    Console.WriteLine($"info string c1 empty: {GetPiece(2, 0) == EMPTY}");
-                    Console.WriteLine($"info string b1 empty: {GetPiece(1, 0) == EMPTY}");
-
                     if (GetPiece(3, 0) == EMPTY &&
                         GetPiece(2, 0) == EMPTY &&
                         GetPiece(1, 0) == EMPTY &&
                         !IsSquareAttackedBy(false, 3, 0) &&
                         !IsSquareAttackedBy(false, 2, 0))
                     {
-                        Console.WriteLine("info string Adding white queenside castling: e1c1");
                         moves.Add(new ChessMove(4, 0, 2, 0));
                     }
                 }
@@ -635,8 +501,6 @@ namespace SimpletonChessEngine
             // Black castling
             else if (piece == BLACK_KING && rank == 7 && file == 4)
             {
-                Console.WriteLine($"info string Black castling rights: Kingside={BlackCanCastleKingside}, Queenside={BlackCanCastleQueenside}");
-
                 // Kingside castling
                 if (BlackCanCastleKingside &&
                     GetPiece(5, 7) == EMPTY &&
@@ -644,7 +508,6 @@ namespace SimpletonChessEngine
                     !IsSquareAttackedBy(true, 5, 7) &&
                     !IsSquareAttackedBy(true, 6, 7))
                 {
-                    Console.WriteLine("info string Adding black kingside castling: e8g8");
                     moves.Add(new ChessMove(4, 7, 6, 7));
                 }
 
@@ -656,7 +519,6 @@ namespace SimpletonChessEngine
                     !IsSquareAttackedBy(true, 3, 7) &&
                     !IsSquareAttackedBy(true, 2, 7))
                 {
-                    Console.WriteLine("info string Adding black queenside castling: e8c8");
                     moves.Add(new ChessMove(4, 7, 2, 7));
                 }
             }
@@ -664,67 +526,9 @@ namespace SimpletonChessEngine
 
         private bool IsLegalMove(ChessMove move)
         {
-            //// Simple check - make move and see if king is in check
-            //var testBoard = new Board(this);
-            //testBoard.MakeMove(move);
-            //return !testBoard.IsInCheck(!whiteToMove);
-
             // ZA SADA SAMO VRATI TRUE - GUI šalje legalne poteze
-            Console.WriteLine($"info string IsLegalMove bypassed for move: {move}");
             return true;
         }
-
-        //public bool IsInCheck(bool whiteKing)
-        //{
-        //    // Nađi poziciju kralja
-        //    int kingFile = -1, kingRank = -1;
-        //    int targetKing = whiteKing ? WHITE_KING : BLACK_KING;
-
-        //    for (int rank = 0; rank < 8; rank++)
-        //    {
-        //        for (int file = 0; file < 8; file++)
-        //        {
-        //            if (GetPiece(file, rank) == targetKing)
-        //            {
-        //                kingFile = file;
-        //                kingRank = rank;
-        //                break;
-        //            }
-        //        }
-        //        if (kingFile != -1) break;
-        //    }
-
-        //    if (kingFile == -1) return false; // Kralj ne postoji (ne bi trebalo da se desi)
-
-        //    // Proveri da li neki protivnički piece napada kralja
-        //    return IsSquareAttackedBy(!whiteKing, kingFile, kingRank);
-        //}
-
-        //public bool IsSquareAttackedBy(bool byWhite, int targetFile, int targetRank)
-        //{
-        //    // Proveri napade svih protivničkih figura
-        //    for (int rank = 0; rank < 8; rank++)
-        //    {
-        //        for (int file = 0; file < 8; file++)
-        //        {
-        //            int piece = GetPiece(file, rank);
-        //            if (piece == EMPTY) continue;
-
-        //            bool isPieceWhite = piece > 0;
-        //            if (isPieceWhite != byWhite) continue;
-
-        //            PieceType pieceType = (PieceType)Math.Abs(piece);
-
-        //            if (CanPieceAttackSquare(pieceType, file, rank, targetFile, targetRank))
-        //            {
-        //                return true;
-        //            }
-        //        }
-        //    }
-
-        //    return false;
-        //}
-
 
         private bool CanPieceAttackSquare(PieceType pieceType, int fromFile, int fromRank, int toFile, int toRank)
         {
@@ -807,8 +611,6 @@ namespace SimpletonChessEngine
         {
             var moves = new List<ChessMove>();
 
-            Console.WriteLine($"info string Generating pseudo-legal moves for {(whiteToMove ? "White" : "Black")}");
-
             for (int rank = 0; rank < 8; rank++)
             {
                 for (int file = 0; file < 8; file++)
@@ -820,8 +622,6 @@ namespace SimpletonChessEngine
                     if (pieceIsWhite != whiteToMove) continue;
 
                     PieceType pieceType = (PieceType)Math.Abs(piece);
-
-                    Console.WriteLine($"info string Found {(pieceIsWhite ? "White" : "Black")} {pieceType} at {(char)('a' + file)}{rank + 1}");
 
                     int moveCountBefore = moves.Count;
 
@@ -848,11 +648,9 @@ namespace SimpletonChessEngine
                     }
 
                     int moveCountAfter = moves.Count;
-                    Console.WriteLine($"info string Generated {moveCountAfter - moveCountBefore} moves for {pieceType} at {(char)('a' + file)}{rank + 1}");
                 }
             }
 
-            Console.WriteLine($"info string Total pseudo-legal moves: {moves.Count}");
             return moves;
         }
 
@@ -887,69 +685,6 @@ namespace SimpletonChessEngine
             }
 
             return score;
-        }
-    }
-
-    // Chess move representation
-    public class ChessMove
-    {
-        public int FromFile { get; set; }
-        public int FromRank { get; set; }
-        public int ToFile { get; set; }
-        public int ToRank { get; set; }
-        public int PromotionPiece { get; set; }
-
-        public ChessMove(int fromFile, int fromRank, int toFile, int toRank, int promotionPiece = Board.EMPTY)
-        {
-            FromFile = fromFile;
-            FromRank = fromRank;
-            ToFile = toFile;
-            ToRank = toRank;
-            PromotionPiece = promotionPiece;
-        }
-
-        public string ToAlgebraic()
-        {
-            char fromFileChar = (char)('a' + FromFile);
-            char toFileChar = (char)('a' + ToFile);
-            string result = $"{fromFileChar}{FromRank + 1}{toFileChar}{ToRank + 1}";
-
-            if (PromotionPiece != Board.EMPTY)
-            {
-                char promotionChar = PromotionPiece == Board.WHITE_QUEEN || PromotionPiece == Board.BLACK_QUEEN ? 'q' :
-                                   PromotionPiece == Board.WHITE_ROOK || PromotionPiece == Board.BLACK_ROOK ? 'r' :
-                                   PromotionPiece == Board.WHITE_BISHOP || PromotionPiece == Board.BLACK_BISHOP ? 'b' : 'n';
-                result += promotionChar;
-            }
-
-            return result;
-        }
-
-        public static ChessMove FromAlgebraic(string moveStr)
-        {
-            if (moveStr.Length < 4) return null;
-
-            int fromFile = moveStr[0] - 'a';
-            int fromRank = moveStr[1] - '1';
-            int toFile = moveStr[2] - 'a';
-            int toRank = moveStr[3] - '1';
-
-            int promotion = Board.EMPTY;
-            if (moveStr.Length == 5)
-            {
-                char promChar = moveStr[4];
-                bool isWhite = fromRank == 6; // Assuming white pawn promoting from 7th rank
-                promotion = promChar switch
-                {
-                    'q' => isWhite ? Board.WHITE_QUEEN : Board.BLACK_QUEEN,
-                    'r' => isWhite ? Board.WHITE_ROOK : Board.BLACK_ROOK,
-                    'b' => isWhite ? Board.WHITE_BISHOP : Board.BLACK_BISHOP,
-                    'n' => isWhite ? Board.WHITE_KNIGHT : Board.BLACK_KNIGHT,
-                    _ => Board.EMPTY
-                };
-            }
-
-            return new ChessMove(fromFile, fromRank, toFile, toRank, promotion);
         }
     }
 }
