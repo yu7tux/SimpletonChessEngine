@@ -13,6 +13,7 @@ namespace SimpletonChessEngine
             return engineType.ToUpper() switch
             {
                 "SIMPLETON" => new SimpletonChessEngine(),
+                "PATHDEPENDANT" => new PathDependentEngine(),
                 //"MATH_V1" => new MathBasedEngine(), // kad napraviš
                 //"NEURAL" => new NeuralNetworkEngine(), // kad napraviš
                 _ => new SimpletonChessEngine() // fallback

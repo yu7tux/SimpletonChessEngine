@@ -4,7 +4,9 @@
 	{
 		static async Task Main(string[] args)
 		{
-			IChessEngine engine = EngineFactory.CreateEngine("SIMPLETON");
+			//IChessEngine engine = EngineFactory.CreateEngine("SIMPLETON");
+			IChessEngine engine = EngineFactory.CreateEngine("PATHDEPENDANT");
+			
 
 			// Proveri argumente
 			if (args.Length > 0)
