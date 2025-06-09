@@ -30,9 +30,13 @@ namespace SimpletonChessEngine
         private const double CONVERGENCE_THRESHOLD = 0.01;
         private const int MAX_PATH_LENGTH = 10;
         private const double CONSTRAINT_PROPAGATION_RATE = 0.8;
+        private const int MINIMAX_DEPTH = 3;
 
         // Random generator za variabilnost
         private readonly Random random = new Random();
+
+        // Cache za pozicije (da izbegnemo re-evaluaciju)
+        private Dictionary<string, double> positionCache = new Dictionary<string, double>();
 
         public PathDependentEngine()
         {
@@ -52,37 +56,190 @@ namespace SimpletonChessEngine
                 gameState.SetPosition(position);
             }
 
+            board = gameState.GetBoard();
             var legalMoves = GenerateLegalMoves();
             if (legalMoves.Count == 0)
             {
                 return "e2e4"; // fallback
             }
 
-            // Analiziraj svaki potez kroz path-dependent framework
+            // Jednostavnija evaluacija sa path-dependent twist
             var moveEvaluations = new Dictionary<Move, double>();
 
             foreach (var move in legalMoves)
             {
-                double evaluation = EvaluateMoveThroughPaths(move);
-                moveEvaluations[move] = evaluation;
+                if (shouldStop) break;
 
-                Console.WriteLine($"info string Move {move} evaluation: {evaluation:F3}");
+                // Osnovna evaluacija poteza
+                double baseEval = GetBaseMoveEvaluation(move);
+
+                // Path-dependent modifikacija
+                var paths = GeneratePathPermutations(move, 2);
+                double pathModifier = 0.0;
+
+                foreach (var path in paths)
+                {
+                    double pathValue = 0.0;
+                    for (int i = 0; i < path.Count; i++)
+                    {
+                        double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                        pathValue += sign * path[i] * 0.01;
+                    }
+                    pathModifier += pathValue;
+                }
+
+                double finalEval = baseEval + pathModifier / paths.Count;
+                moveEvaluations[move] = finalEval;
             }
 
-            // Dodaj malo randomness da ne bira uvek iste poteze
+            // Odaberi najbolji potez
+            if (moveEvaluations.Count == 0)
+            {
+                return legalMoves[0].ToString();
+            }
+
             var sortedMoves = moveEvaluations.OrderByDescending(kvp => kvp.Value).ToList();
 
-            // Uzmi top 3 poteza i random biraj između njih
-            var topMoves = sortedMoves.Take(3).ToList();
-            if (topMoves.Count > 0)
+            // Prikaži top 5 poteza
+            Console.WriteLine("info string Top moves:");
+            foreach (var kvp in sortedMoves.Take(5))
             {
-                var selectedMove = topMoves[random.Next(topMoves.Count)];
-                Console.WriteLine($"info string Selected move: {selectedMove.Key} with evaluation: {selectedMove.Value:F3}");
-                return selectedMove.Key.ToString();
+                Console.WriteLine($"info string   {kvp.Key}: {kvp.Value:F3}");
             }
 
-            // Fallback
-            return legalMoves[0].ToString();
+            var bestMove = sortedMoves.First().Key;
+            Console.WriteLine($"info string Best move: {bestMove}");
+
+            return bestMove.ToString();
+        }
+
+        /// <summary>
+        /// Path-dependent MiniMax - evaluacija zavisi od path-a kroz stablo
+        /// </summary>
+        private double PathDependentMiniMax(Move move, int depth, bool isMaximizing,
+            double alpha, double beta, List<int> path, List<Constraint> constraints)
+        {
+            // Ako je depth 0, samo evaluiraj trenutnu poziciju
+            if (depth == 0)
+            {
+                return PathDependentEvaluation(path, constraints);
+            }
+
+            // Za sada, pojednostavljena evaluacija
+            // Koristi brzu evaluaciju poteza + path modifikator
+            double baseEval = GetBaseMoveEvaluation(move);
+
+            // Path-dependent modifikacija
+            double pathModifier = 0.0;
+            for (int i = 0; i < path.Count; i++)
+            {
+                double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                pathModifier += sign * path[i] * 0.1;
+            }
+
+            // Constraint modifikacija
+            foreach (var constraint in constraints)
+            {
+                baseEval *= (1.0 + constraint.Strength * 0.05);
+            }
+
+            return baseEval + pathModifier;
+        }
+
+        /// <summary>
+        /// Path-dependent evaluation - vrednost pozicije zavisi od path-a
+        /// </summary>
+        private double PathDependentEvaluation(List<int> path, List<Constraint> constraints)
+        {
+            double eval = 0.0;
+
+            // Osnovni materijal
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if (piece != Board.EMPTY)
+                    {
+                        double value = GetPieceValue(Math.Abs(piece));
+                        eval += (piece > 0) ? value : -value;
+                    }
+                }
+            }
+
+            // Path-dependent modifikacija bazirano na constraints
+            foreach (var constraint in constraints)
+            {
+                eval *= (1.0 + constraint.Strength * 0.01);
+            }
+
+            // Alternating series baziran na path-u
+            double pathModifier = 0.0;
+            for (int i = 0; i < path.Count; i++)
+            {
+                double sign = (i % 2 == 0) ? 1.0 : -1.0;
+                pathModifier += sign * path[i] * 0.01;
+            }
+
+            eval += pathModifier;
+
+            return eval;
+        }
+
+        /// <summary>
+        /// Generiše različite path permutacije za početni potez
+        /// </summary>
+        private List<List<int>> GeneratePathPermutations(Move initialMove, int numPaths)
+        {
+            var paths = new List<List<int>>();
+
+            for (int i = 0; i < numPaths; i++)
+            {
+                var path = new List<int>();
+                // Različite početne permutacije
+                for (int j = 0; j < 3; j++)
+                {
+                    path.Add((i + j * 7) % 10); // Pseudo-random ali determinističko
+                }
+                paths.Add(path);
+            }
+
+            return paths;
+        }
+
+        /// <summary>
+        /// Permutuje poteze na osnovu path-a
+        /// </summary>
+        private List<Move> PermuteMoves(List<Move> moves, List<int> path)
+        {
+            if (path.Count == 0) return moves;
+
+            // Koristi path za determinističku permutaciju
+            var seed = path.Sum() % 100;
+            var rng = new Random(seed);
+
+            return moves.OrderBy(m => rng.Next()).ToList();
+        }
+
+        /// <summary>
+        /// Generiše legalne poteze za dati board state
+        /// </summary>
+        private List<Move> GenerateLegalMovesForBoard(Board boardState)
+        {
+            var savedBoard = board;
+            board = boardState;
+            var moves = GenerateLegalMoves();
+            board = savedBoard;
+            return moves;
+        }
+
+        /// <summary>
+        /// Vraća FEN reprezentaciju trenutne pozicije
+        /// </summary>
+        private string GetCurrentFEN()
+        {
+            // Simplified FEN - samo za test
+            return "current_position";
         }
 
         /// <summary>
@@ -114,34 +271,67 @@ namespace SimpletonChessEngine
         {
             double eval = 0.0;
 
-            // Centralizacija
+            string from = move.From;
             string to = move.To;
+            int fromFile = from[0] - 'a';
+            int fromRank = from[1] - '1';
             int toFile = to[0] - 'a';
             int toRank = to[1] - '1';
 
-            // Favorizuj centralne poteze
-            double centerDistance = Math.Sqrt(Math.Pow(toFile - 3.5, 2) + Math.Pow(toRank - 3.5, 2));
-            eval += (5.0 - centerDistance) * 0.1;
-
-            // Razvitak figura (ne pešaci)
-            string from = move.From;
-            int fromRank = from[1] - '1';
-            bool isWhite = board.IsWhiteToMove();
-
-            if ((isWhite && fromRank == 0) || (!isWhite && fromRank == 7))
-            {
-                eval += 0.3; // Bonus za razvitak
-            }
-
-            // Capture bonus
+            int movingPiece = board.GetPiece(fromFile, fromRank);
             int targetPiece = board.GetPiece(toFile, toRank);
+
+            // Debug info
+            Console.WriteLine($"info string Evaluating {move}: piece {movingPiece} to square with {targetPiece}");
+
+            // CAPTURE BONUS - najvažnije!
             if (targetPiece != Board.EMPTY)
             {
-                eval += GetPieceValue(Math.Abs(targetPiece)) * 0.5;
+                double captureValue = GetPieceValue(Math.Abs(targetPiece));
+                eval += captureValue * 10.0;
+                Console.WriteLine($"info string   Capture bonus: +{captureValue * 10.0}");
             }
 
-            // Dodaj malo random šuma
-            eval += random.NextDouble() * 0.2 - 0.1;
+            // Centralizacija
+            double centerBonus = 0.0;
+            if (toFile >= 2 && toFile <= 5 && toRank >= 2 && toRank <= 5)
+            {
+                centerBonus = 0.3;
+                if ((toFile == 3 || toFile == 4) && (toRank == 3 || toRank == 4))
+                {
+                    centerBonus = 0.5;
+                }
+            }
+            eval += centerBonus;
+
+            // Razvitak figura (ne pešaci)
+            if (Math.Abs(movingPiece) != Board.WHITE_PAWN)
+            {
+                bool isWhite = movingPiece > 0;
+                if ((isWhite && fromRank == 0) || (!isWhite && fromRank == 7))
+                {
+                    eval += 0.4; // Bonus za razvitak
+                }
+            }
+
+            // Pawn advancement
+            if (Math.Abs(movingPiece) == Board.WHITE_PAWN)
+            {
+                bool isWhite = movingPiece > 0;
+                if (isWhite)
+                {
+                    eval += (toRank - fromRank) * 0.1;
+                }
+                else
+                {
+                    eval += (fromRank - toRank) * 0.1;
+                }
+            }
+
+            // Random factor - VRLO MALI
+            eval += (random.NextDouble() - 0.5) * 0.02;
+
+            Console.WriteLine($"info string   Total eval for {move}: {eval:F3}");
 
             return eval;
         }
@@ -262,10 +452,13 @@ namespace SimpletonChessEngine
         /// <summary>
         /// Generiše sve legalne poteze iz trenutne pozicije
         /// </summary>
-        private List<Move> GenerateLegalMoves()
+        public List<Move> GenerateLegalMoves()
         {
             var moves = new List<Move>();
             board = gameState.GetBoard(); // Osiguraj da imamo najnoviji board
+
+            // Prvo proveri da li smo u šahu
+            bool inCheck = IsKingInCheck(board.IsWhiteToMove());
 
             // Generiši sve moguće poteze
             for (int fromRank = 0; fromRank < 8; fromRank++)
@@ -286,6 +479,45 @@ namespace SimpletonChessEngine
 
             // Filtriraj ilegalne poteze (oni koji ostavljaju kralja u šahu)
             return FilterLegalMoves(moves);
+        }
+
+        // Overload koji prima GameState (za kompatibilnost sa EngineSandbox)
+        public List<Move> GenerateLegalMoves(GameState state)
+        {
+            // Samo koristi trenutni board iz prosleđenog state-a
+            var savedBoard = board;
+            board = state.GetBoard();
+
+            var moves = GenerateLegalMoves();
+
+            board = savedBoard; // Vrati originalni board
+            return moves;
+        }
+
+        public bool IsKingInCheck(bool whiteKing)
+        {
+            // Nađi kralja
+            int kingFile = -1, kingRank = -1;
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if ((whiteKing && piece == Board.WHITE_KING) ||
+                        (!whiteKing && piece == Board.BLACK_KING))
+                    {
+                        kingFile = file;
+                        kingRank = rank;
+                        break;
+                    }
+                }
+                if (kingFile >= 0) break;
+            }
+
+            if (kingFile < 0) return false; // Kralj nije pronađen?
+
+            // Proveri da li je kralj napadnut
+            return IsSquareAttacked(kingFile, kingRank, !whiteKing);
         }
 
         private void GenerateMovesForPiece(int fromFile, int fromRank, int piece, List<Move> moves)
@@ -492,40 +724,89 @@ namespace SimpletonChessEngine
 
         private bool LeavesKingInCheck(Move move)
         {
-            // Privremeno napravi potez
-            var originalBoard = board;
-            var chessMove = ChessMove.FromAlgebraic(move.ToString());
-            if (chessMove == null) return true;
+            // Bez menjanja board-a, logički proveri
+            string from = move.From;
+            string to = move.To;
 
-            board.MakeMove(chessMove);
-            bool isWhiteToMove = !board.IsWhiteToMove(); // Nakon poteza
+            int fromFile = from[0] - 'a';
+            int fromRank = from[1] - '1';
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
 
-            // Nađi kralja
-            int kingFile = -1, kingRank = -1;
+            int movingPiece = board.GetPiece(fromFile, fromRank);
+            bool isWhiteToMove = board.IsWhiteToMove();
+
+            // Ako je u šahu, mora da skloni kralja ili blokira
+            if (IsKingInCheck(isWhiteToMove))
+            {
+                // Za sada, dozvoli samo poteze kralja
+                if (Math.Abs(movingPiece) == Board.WHITE_KING)
+                {
+                    // Proveri da li kralj ide na sigurno polje
+                    return WouldSquareBeAttacked(toFile, toRank, !isWhiteToMove, fromFile, fromRank);
+                }
+                // TODO: Dodaj logiku za blokiranje šaha
+                return true; // Ostali potezi nisu dozvoljeni kad smo u šahu
+            }
+
+            // Ako pomeramo kralja, ne sme na napadnuto polje
+            if (Math.Abs(movingPiece) == Board.WHITE_KING)
+            {
+                return WouldSquareBeAttacked(toFile, toRank, !isWhiteToMove, fromFile, fromRank);
+            }
+
+            // Za ostale figure, osnovne provere
+            return false;
+        }
+
+        private bool WouldSquareBeAttacked(int targetFile, int targetRank, bool byWhite,
+            int ignoredFile, int ignoredRank)
+        {
+            // Proveri da li bi polje bilo napadnuto, ignorišući figuru na ignoredFile/Rank
+            for (int fromRank = 0; fromRank < 8; fromRank++)
+            {
+                for (int fromFile = 0; fromFile < 8; fromFile++)
+                {
+                    if (fromFile == ignoredFile && fromRank == ignoredRank) continue;
+
+                    int piece = board.GetPiece(fromFile, fromRank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isPieceWhite = piece > 0;
+                    if (isPieceWhite != byWhite) continue;
+
+                    if (CanPieceAttack(fromFile, fromRank, targetFile, targetRank, Math.Abs(piece)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Brza evaluacija bez path analysis za debug
+        /// </summary>
+        public double QuickEvaluate()
+        {
+            double eval = 0.0;
+
+            // Materijalna evaluacija
             for (int rank = 0; rank < 8; rank++)
             {
                 for (int file = 0; file < 8; file++)
                 {
                     int piece = board.GetPiece(file, rank);
-                    if ((isWhiteToMove && piece == Board.WHITE_KING) ||
-                        (!isWhiteToMove && piece == Board.BLACK_KING))
+                    if (piece != Board.EMPTY)
                     {
-                        kingFile = file;
-                        kingRank = rank;
-                        break;
+                        double value = GetPieceValue(Math.Abs(piece));
+                        eval += (piece > 0) ? value : -value;
                     }
                 }
-                if (kingFile >= 0) break;
             }
 
-            // Proveri da li je kralj napadnut
-            bool inCheck = IsSquareAttacked(kingFile, kingRank, !isWhiteToMove);
-
-            // Vrati potez (ovo nije idealno, trebalo bi proper undo)
-            // Za sada samo resetuj board reference
-            board = originalBoard;
-
-            return inCheck;
+            return eval;
         }
 
         private bool IsSquareAttacked(int file, int rank, bool byWhite)
@@ -541,15 +822,33 @@ namespace SimpletonChessEngine
                     bool isPieceWhite = piece > 0;
                     if (isPieceWhite != byWhite) continue;
 
-                    // Proveri da li ova figura može napasti target square
+                    // Debug
                     if (CanPieceAttack(fromFile, fromRank, file, rank, Math.Abs(piece)))
                     {
+                        char pieceChar = GetPieceChar(piece);
+                        Console.WriteLine($"info string Square {(char)('a' + file)}{rank + 1} is attacked by {pieceChar} at {(char)('a' + fromFile)}{fromRank + 1}");
                         return true;
                     }
                 }
             }
 
             return false;
+        }
+
+        private char GetPieceChar(int piece)
+        {
+            int absPiece = Math.Abs(piece);
+            char c = ' ';
+            switch (absPiece)
+            {
+                case Board.WHITE_PAWN: c = 'P'; break;
+                case Board.WHITE_KNIGHT: c = 'N'; break;
+                case Board.WHITE_BISHOP: c = 'B'; break;
+                case Board.WHITE_ROOK: c = 'R'; break;
+                case Board.WHITE_QUEEN: c = 'Q'; break;
+                case Board.WHITE_KING: c = 'K'; break;
+            }
+            return piece > 0 ? c : char.ToLower(c);
         }
 
         private bool CanPieceAttack(int fromFile, int fromRank, int toFile, int toRank, int pieceType)

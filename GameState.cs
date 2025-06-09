@@ -22,7 +22,50 @@ namespace SimpletonChessEngine
         public void SetPosition(string fen)
         {
             Console.Error.WriteLine($"[DEBUG] SetPosition called with: {fen}");
-            Reset(); // Za sada, samo reset
+
+            board = new Board();
+
+            string[] parts = fen.Split(' ');
+            if (parts.Length < 2)
+            {
+                Console.Error.WriteLine($"[ERROR] Invalid FEN: {fen}");
+                return;
+            }
+
+            string[] ranks = parts[0].Split('/');
+            for (int rank = 0; rank < 8; rank++)
+            {
+                int file = 0;
+                foreach (char c in ranks[7 - rank]) // obrnut redosled (rank 8 do 1)
+                {
+                    if (char.IsDigit(c))
+                    {
+                        file += c - '0';
+                    }
+                    else
+                    {
+                        int piece = FenCharToPiece(c);
+                        board.SetPiece(file, rank, piece);
+                        file++;
+                    }
+                }
+            }
+
+            board.SetWhiteToMove(parts[1] == "w");
+        }
+
+        private int FenCharToPiece(char c)
+        {
+            switch (char.ToLower(c))
+            {
+                case 'p': return c == 'p' ? Board.BLACK_PAWN : Board.WHITE_PAWN;
+                case 'n': return c == 'n' ? Board.BLACK_KNIGHT : Board.WHITE_KNIGHT;
+                case 'b': return c == 'b' ? Board.BLACK_BISHOP : Board.WHITE_BISHOP;
+                case 'r': return c == 'r' ? Board.BLACK_ROOK : Board.WHITE_ROOK;
+                case 'q': return c == 'q' ? Board.BLACK_QUEEN : Board.WHITE_QUEEN;
+                case 'k': return c == 'k' ? Board.BLACK_KING : Board.WHITE_KING;
+                default: return Board.EMPTY;
+            }
         }
 
         public void MakeMove(Move move)
@@ -39,7 +82,14 @@ namespace SimpletonChessEngine
                 {
                     Console.Error.WriteLine($"[DEBUG] Applying move: {chessMove.ToAlgebraic()}");
 
-                    board.MakeMove(chessMove);
+                    try
+                    {
+                        board.MakeMove(chessMove);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[ERROR] Illegal move attempted: {chessMove.ToAlgebraic()} — {ex.Message}");
+                    }
 
                     Console.Error.WriteLine($"[DEBUG] AFTER move - whiteToMove: {board.IsWhiteToMove()}");
                 }
@@ -130,6 +180,18 @@ namespace SimpletonChessEngine
             {
                 Console.Error.WriteLine($"[DEBUG] {i + 1}. {moveHistory[i]}");
             }
+        }
+
+        public string GetFen()
+        {
+            return board.ToFEN(); // ili kako se već metoda zove u klasi Board
+        }
+
+
+
+        internal Move Clone()
+        {
+            throw new NotImplementedException();
         }
     }
 }

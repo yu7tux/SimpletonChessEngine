@@ -39,5 +39,19 @@ namespace SimpletonChessEngine
             Console.Error.WriteLine($"[DEBUG] Move.ToString() returning: '{result}'");
             return result;
         }
+
+        public override bool Equals(object obj)
+        {
+            if (obj is Move other)
+            {
+                return this.From == other.From && this.To == other.To && this.Promotion == other.Promotion;
+            }
+            return false;
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(From, To, Promotion);
+        }
     }
 }

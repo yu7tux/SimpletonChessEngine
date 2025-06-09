@@ -27,6 +27,11 @@ namespace SimpletonChessEngine
         private bool blackCanCastleQueenside = true;
         private string enPassantSquare = "";
 
+        public void SetWhiteToMove(bool isWhite)
+        {
+            whiteToMove = isWhite;
+        }
+
         // En passant
         private int enPassantFile = -1; // -1 means no en passant possible
 
@@ -685,6 +690,64 @@ namespace SimpletonChessEngine
             }
 
             return score;
+        }
+
+        public string ToFEN()
+        {
+            string fen = "";
+            for (int rank = 7; rank >= 0; rank--)
+            {
+                int empty = 0;
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = GetPiece(file, rank);
+                    if (piece == EMPTY)
+                    {
+                        empty++;
+                    }
+                    else
+                    {
+                        if (empty > 0)
+                        {
+                            fen += empty.ToString();
+                            empty = 0;
+                        }
+
+                        fen += PieceToChar(piece);
+                    }
+                }
+                if (empty > 0)
+                {
+                    fen += empty.ToString();
+                }
+
+                if (rank > 0)
+                {
+                    fen += "/";
+                }
+            }
+
+            // Dodaj ko je na potezu
+            fen += IsWhiteToMove() ? " w " : " b ";
+
+            // Za sada pojednostavljeno: bez rokada, en passant, pola poteza, itd.
+            fen += "- - 0 1";
+
+            return fen;
+        }
+
+        private char PieceToChar(int piece)
+        {
+            switch (Math.Abs(piece))
+            {
+                case WHITE_PAWN: return piece > 0 ? 'P' : 'p';
+                case WHITE_KNIGHT: return piece > 0 ? 'N' : 'n';
+                case WHITE_BISHOP: return piece > 0 ? 'B' : 'b';
+                case WHITE_ROOK: return piece > 0 ? 'R' : 'r';
+                case WHITE_QUEEN: return piece > 0 ? 'Q' : 'q';
+                case WHITE_KING: return piece > 0 ? 'K' : 'k';
+                default: return '?';
+            }
         }
     }
 }
