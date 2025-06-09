@@ -31,6 +31,9 @@ namespace SimpletonChessEngine
         private const int MAX_PATH_LENGTH = 10;
         private const double CONSTRAINT_PROPAGATION_RATE = 0.8;
 
+        // Random generator za variabilnost
+        private readonly Random random = new Random();
+
         public PathDependentEngine()
         {
             gameState = new GameState();
@@ -66,11 +69,20 @@ namespace SimpletonChessEngine
                 Console.WriteLine($"info string Move {move} evaluation: {evaluation:F3}");
             }
 
-            // Odaberi potez sa najboljom path-dependent evaluacijom
-            var bestMove = moveEvaluations.OrderByDescending(kvp => kvp.Value).First().Key;
+            // Dodaj malo randomness da ne bira uvek iste poteze
+            var sortedMoves = moveEvaluations.OrderByDescending(kvp => kvp.Value).ToList();
 
-            Console.WriteLine($"info string Selected move: {bestMove} with evaluation: {moveEvaluations[bestMove]:F3}");
-            return bestMove.ToString();
+            // Uzmi top 3 poteza i random biraj između njih
+            var topMoves = sortedMoves.Take(3).ToList();
+            if (topMoves.Count > 0)
+            {
+                var selectedMove = topMoves[random.Next(topMoves.Count)];
+                Console.WriteLine($"info string Selected move: {selectedMove.Key} with evaluation: {selectedMove.Value:F3}");
+                return selectedMove.Key.ToString();
+            }
+
+            // Fallback
+            return legalMoves[0].ToString();
         }
 
         /// <summary>
@@ -81,18 +93,70 @@ namespace SimpletonChessEngine
             var pathEvaluations = new List<double>();
             var constraints = constraintNetwork.GetActiveConstraints(gameState, move);
 
+            // Dodaj osnovnu heuristiku za različite tipove poteza
+            double baseEval = GetBaseMoveEvaluation(move);
+
             // Generiši različite paths (permutacije budućih poteza)
-            var futurePaths = GenerateFuturePaths(move, MAX_PATH_LENGTH);
+            var futurePaths = GenerateFuturePaths(move, Math.Min(MAX_PATH_LENGTH, 3)); // Smanji depth za brzinu
 
             foreach (var path in futurePaths)
             {
                 // Svaki path ima svoju trajektoriju kroz phase space
                 double pathValue = ComputePathValue(path, constraints);
-                pathEvaluations.Add(pathValue);
+                pathEvaluations.Add(baseEval + pathValue);
             }
 
             // Conditional convergence - različite permutacije daju različite sume
             return ComputeConditionalConvergence(pathEvaluations);
+        }
+
+        private double GetBaseMoveEvaluation(Move move)
+        {
+            double eval = 0.0;
+
+            // Centralizacija
+            string to = move.To;
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
+
+            // Favorizuj centralne poteze
+            double centerDistance = Math.Sqrt(Math.Pow(toFile - 3.5, 2) + Math.Pow(toRank - 3.5, 2));
+            eval += (5.0 - centerDistance) * 0.1;
+
+            // Razvitak figura (ne pešaci)
+            string from = move.From;
+            int fromRank = from[1] - '1';
+            bool isWhite = board.IsWhiteToMove();
+
+            if ((isWhite && fromRank == 0) || (!isWhite && fromRank == 7))
+            {
+                eval += 0.3; // Bonus za razvitak
+            }
+
+            // Capture bonus
+            int targetPiece = board.GetPiece(toFile, toRank);
+            if (targetPiece != Board.EMPTY)
+            {
+                eval += GetPieceValue(Math.Abs(targetPiece)) * 0.5;
+            }
+
+            // Dodaj malo random šuma
+            eval += random.NextDouble() * 0.2 - 0.1;
+
+            return eval;
+        }
+
+        private double GetPieceValue(int pieceType)
+        {
+            switch (pieceType)
+            {
+                case Board.WHITE_PAWN: return 1.0;
+                case Board.WHITE_KNIGHT: return 3.0;
+                case Board.WHITE_BISHOP: return 3.0;
+                case Board.WHITE_ROOK: return 5.0;
+                case Board.WHITE_QUEEN: return 9.0;
+                default: return 0.0;
+            }
         }
 
         /// <summary>
@@ -412,9 +476,140 @@ namespace SimpletonChessEngine
 
         private List<Move> FilterLegalMoves(List<Move> moves)
         {
-            // Za sada vraćamo sve poteze
-            // U produkciji bi trebalo filtrirati poteze koji ostavljaju kralja u šahu
-            return moves;
+            var legalMoves = new List<Move>();
+
+            foreach (var move in moves)
+            {
+                // Proveri da li potez ostavlja kralja u šahu
+                if (!LeavesKingInCheck(move))
+                {
+                    legalMoves.Add(move);
+                }
+            }
+
+            return legalMoves;
+        }
+
+        private bool LeavesKingInCheck(Move move)
+        {
+            // Privremeno napravi potez
+            var originalBoard = board;
+            var chessMove = ChessMove.FromAlgebraic(move.ToString());
+            if (chessMove == null) return true;
+
+            board.MakeMove(chessMove);
+            bool isWhiteToMove = !board.IsWhiteToMove(); // Nakon poteza
+
+            // Nađi kralja
+            int kingFile = -1, kingRank = -1;
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if ((isWhiteToMove && piece == Board.WHITE_KING) ||
+                        (!isWhiteToMove && piece == Board.BLACK_KING))
+                    {
+                        kingFile = file;
+                        kingRank = rank;
+                        break;
+                    }
+                }
+                if (kingFile >= 0) break;
+            }
+
+            // Proveri da li je kralj napadnut
+            bool inCheck = IsSquareAttacked(kingFile, kingRank, !isWhiteToMove);
+
+            // Vrati potez (ovo nije idealno, trebalo bi proper undo)
+            // Za sada samo resetuj board reference
+            board = originalBoard;
+
+            return inCheck;
+        }
+
+        private bool IsSquareAttacked(int file, int rank, bool byWhite)
+        {
+            // Proveri sve protivničke figure
+            for (int fromRank = 0; fromRank < 8; fromRank++)
+            {
+                for (int fromFile = 0; fromFile < 8; fromFile++)
+                {
+                    int piece = board.GetPiece(fromFile, fromRank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isPieceWhite = piece > 0;
+                    if (isPieceWhite != byWhite) continue;
+
+                    // Proveri da li ova figura može napasti target square
+                    if (CanPieceAttack(fromFile, fromRank, file, rank, Math.Abs(piece)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool CanPieceAttack(int fromFile, int fromRank, int toFile, int toRank, int pieceType)
+        {
+            int df = toFile - fromFile;
+            int dr = toRank - fromRank;
+
+            switch (pieceType)
+            {
+                case Board.WHITE_PAWN:
+                    // Pawn attacks diagonally
+                    bool isWhite = board.GetPiece(fromFile, fromRank) > 0;
+                    int pawnDir = isWhite ? 1 : -1;
+                    return Math.Abs(df) == 1 && dr == pawnDir;
+
+                case Board.WHITE_KNIGHT:
+                    return (Math.Abs(df) == 2 && Math.Abs(dr) == 1) ||
+                           (Math.Abs(df) == 1 && Math.Abs(dr) == 2);
+
+                case Board.WHITE_BISHOP:
+                    if (Math.Abs(df) != Math.Abs(dr)) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_ROOK:
+                    if (df != 0 && dr != 0) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_QUEEN:
+                    if (df != 0 && dr != 0 && Math.Abs(df) != Math.Abs(dr)) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_KING:
+                    return Math.Abs(df) <= 1 && Math.Abs(dr) <= 1;
+
+                default:
+                    return false;
+            }
+        }
+
+        private bool IsPathClear(int fromFile, int fromRank, int toFile, int toRank)
+        {
+            int df = toFile - fromFile;
+            int dr = toRank - fromRank;
+            int steps = Math.Max(Math.Abs(df), Math.Abs(dr));
+
+            int stepFile = df == 0 ? 0 : df / Math.Abs(df);
+            int stepRank = dr == 0 ? 0 : dr / Math.Abs(dr);
+
+            for (int i = 1; i < steps; i++)
+            {
+                int checkFile = fromFile + i * stepFile;
+                int checkRank = fromRank + i * stepRank;
+
+                if (board.GetPiece(checkFile, checkRank) != Board.EMPTY)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         // UCI protokol metode
