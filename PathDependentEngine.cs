@@ -1,4 +1,6 @@
-﻿using System;
+﻿using LichessNET.Entities.Game;
+using Spectre.Console;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -119,7 +121,65 @@ namespace SimpletonChessEngine
             var bestMove = sortedMoves.First().Key;
             Console.WriteLine($"info string Best move: {bestMove}");
 
+
+            foreach (var move in legalMoves)
+            {
+                if (!IsMoveLegal(move))
+                {
+                    Console.WriteLine($"info string WARNING: Illegal move generated: {move}");
+                }
+            }
+
             return bestMove.ToString();
+        }
+
+
+        private bool IsMoveLegal(Move move)
+        {
+            // Simuliraj potez koristeći novi engine i proveri da li kralj ostaje bezbedan
+            return !SimulateMoveLeavesKingInCheck(move);
+        }
+
+        private List<Move> FilterLegalMoves(List<Move> moves)
+        {
+            var legalMoves = new List<Move>();
+            foreach (var move in moves)
+            {
+                if (!SimulateMoveLeavesKingInCheck(move))
+                {
+                    legalMoves.Add(move);
+                }
+            }
+            return legalMoves;
+        }
+
+
+        private bool SimulateMoveLeavesKingInCheck(Move move)
+        {
+            try
+            {
+                var tempEngine = new PathDependentEngine();
+                var history = pathMemory.GetRecentMoves(1000).Select(m => m.ToString()).ToArray();
+                var reconstructedMoves = history.Select(Move.Parse).Where(m => m != null).ToList();
+
+                foreach (var pastMove in reconstructedMoves)
+                {
+                    tempEngine.ApplyMoveWithoutChecks(pastMove);
+                }
+
+                var testMove = Move.Parse(move.ToString());
+                if (testMove != null)
+                {
+                    tempEngine.ApplyMoveWithoutChecks(testMove);
+                }
+
+                return tempEngine.IsKingInCheck(!board.IsWhiteToMove());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"info string Simulacija pala za potez {move}: {ex.Message}");
+                return true;
+            }
         }
 
         /// <summary>
@@ -327,6 +387,15 @@ namespace SimpletonChessEngine
             int targetPiece = board.GetPiece(toFile, toRank);
             double movingPieceValue = GetPieceValue(Math.Abs(movingPiece));
 
+            bool wasUnderAttack = CanOpponentCaptureOn(fromFile, fromRank, fromFile, fromRank);
+            bool movesToSafety = !CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank);
+
+            if (wasUnderAttack && movesToSafety)
+            {
+                eval += movingPieceValue * 2.5;
+                Console.WriteLine($"info string ESCAPE: {GetPieceChar(movingPiece)} at {from} escapes capture");
+            }
+
             // KRITIČNO: Proveri da li će figura biti pojedena
             bool isSquareSafe = !CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank);
 
@@ -338,6 +407,18 @@ namespace SimpletonChessEngine
                     // Pomeramo figuru na napadnuto prazno polje - LOŠE!
                     Console.WriteLine($"info string WARNING: {move} moves {GetPieceChar(movingPiece)} to attacked square!");
                     eval -= movingPieceValue * 50.0;
+
+                    CheckUndefendedPieces(
+                                            move,
+                                            movingPiece,
+                                            targetPiece,
+                                            fromFile,
+                                            fromRank,
+                                            toFile,
+                                            toRank,
+                                            movingPieceValue,
+                                            ref eval);
+
                     return eval; // Odmah vrati
                 }
                 else
@@ -350,10 +431,23 @@ namespace SimpletonChessEngine
                         double loss = movingPieceValue - captureValue;
                         Console.WriteLine($"info string BAD TRADE: {move} loses {loss} material!");
                         eval -= loss * 50.0;
+
+                        CheckUndefendedPieces(
+                                           move,
+                                           movingPiece,
+                                           targetPiece,
+                                           fromFile,
+                                           fromRank,
+                                           toFile,
+                                           toRank,
+                                           movingPieceValue,
+                                           ref eval);
+
                         return eval;
                     }
                 }
             }
+
 
             // CAPTURE BONUS
             if (targetPiece != Board.EMPTY)
@@ -402,8 +496,123 @@ namespace SimpletonChessEngine
             // Random - minimalan
             eval += (random.NextDouble() - 0.5) * 0.02;
 
+            // BONUS za hvatanje nebranjenih figura
+            if (targetPiece != Board.EMPTY)
+            {
+                bool isTargetDefended = CanOpponentCaptureOn(toFile, toRank, -1, -1);
+                bool isTargetAttacked = CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank);
+
+                if (!isTargetDefended)
+                {
+                    double captureValue = GetPieceValue(Math.Abs(targetPiece));
+                    eval += captureValue * 15.0; // velika nagrada za hvatanje nebranjenih figura
+                    Console.WriteLine($"info string HANGING PIECE: {move} captures undefended {GetPieceChar(targetPiece)}");
+                }
+            }
+
+            // prevent King being a coward
+            if (Math.Abs(movingPiece) == Board.WHITE_KING)
+            {
+                // Kralj ide na polje koje je napadnuto
+                if (!isSquareSafe)
+                {
+                    eval -= 100.0; // veliki penal za kralja koji ide na napadnuto polje
+                    Console.WriteLine($"info string DANGEROUS KING MOVE: {move} moves king into danger!");
+                }
+
+                // Ako kralj ide ka centru u kasnoj fazi igre - opasno
+                if (toRank >= 2 && toRank <= 5 && toFile >= 2 && toFile <= 5)
+                {
+                    eval -= 5.0;
+                    Console.WriteLine($"info string King moves toward center: {move}");
+                }
+            }
+
             return eval;
         }
+
+        private void CheckUndefendedPieces(
+                                            Move move,
+                                            int movingPiece,
+                                            int targetPiece,
+                                            int fromFile,
+                                            int fromRank,
+                                            int toFile,
+                                            int toRank,
+                                            double movingPieceValue,
+                                            ref double eval)
+        {
+            // DODATNA PROVERA: Da li figura ostaje nebranjenja nakon poteza?
+            if (targetPiece == Board.EMPTY && CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank))
+            {
+                double exposurePenalty = movingPieceValue * 20.0;
+                eval -= exposurePenalty;
+                Console.WriteLine($"info string {move} EXPOSES {GetPieceChar(movingPiece)} to capture! Penalty: {exposurePenalty}");
+            }
+
+            // Ako potez ostavlja damu ili topa nebranjenog, kazni
+            if (Math.Abs(movingPiece) == Board.WHITE_QUEEN || Math.Abs(movingPiece) == Board.WHITE_ROOK)
+            {
+                if (CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank))
+                {
+                    double danger = GetPieceValue(Math.Abs(movingPiece)) * 20.0;
+                    eval -= danger;
+                    Console.WriteLine($"info string DANGER: {GetPieceChar(movingPiece)} will be captured at {move.To}!");
+                }
+            }
+
+            // BONUS: Ako ovaj potez vodi do mata
+            if (MoveLeadsToMate(move))
+            {
+                eval += 100000.0; // ekstremna nagrada
+                Console.WriteLine($"info string MATE IN ONE FOUND: {move}");
+            }
+
+            // PENAL: Ako potez dozvoljava protivniku mat u 1
+            if (AllowsMateNextTurn(move))
+            {
+                eval -= 100000.0;
+                Console.WriteLine($"info string BLUNDER: {move} allows mate next turn!");
+            }
+        }
+
+
+        private bool AllowsMateNextTurn(Move move)
+        {
+            var tempEngine = new PathDependentEngine();
+            var history = pathMemory.GetRecentMoves(1000).Select(m => m.ToString()).ToArray();
+            var replayMoves = history.Select(Move.Parse).Where(m => m != null).ToList();
+
+            foreach (var past in replayMoves)
+            {
+                tempEngine.ApplyMoveWithoutChecks(past);
+                tempEngine.board = tempEngine.gameState.GetBoard();
+            }
+
+            tempEngine.ApplyMoveWithoutChecks(move);
+            tempEngine.board = tempEngine.gameState.GetBoard();
+
+            var opponentMoves = tempEngine.GenerateLegalMoves();
+            foreach (var oppMove in opponentMoves)
+            {
+                var tempNext = new PathDependentEngine();
+                var allMoves = replayMoves.Append(move).Append(oppMove).ToList();
+                foreach (var m in allMoves)
+                {
+                    tempNext.ApplyMoveWithoutChecks(m);
+                    tempNext.board = tempNext.gameState.GetBoard();
+                }
+
+                if (tempNext.GenerateLegalMoves().Count == 0 && tempNext.IsKingInCheck(board.IsWhiteToMove()))
+                {
+                    return true; // protivnik ima mat u 1
+                }
+            }
+
+            return false;
+        }
+
+
 
         /// <summary>
         /// Proverava da li protivnik može da pojede figuru na datom polju
@@ -849,21 +1058,21 @@ namespace SimpletonChessEngine
             }
         }
 
-        private List<Move> FilterLegalMoves(List<Move> moves)
-        {
-            var legalMoves = new List<Move>();
+        //private List<Move> FilterLegalMoves(List<Move> moves)
+        //{
+        //    var legalMoves = new List<Move>();
 
-            foreach (var move in moves)
-            {
-                // Proveri da li potez ostavlja kralja u šahu
-                if (!LeavesKingInCheck(move))
-                {
-                    legalMoves.Add(move);
-                }
-            }
+        //    foreach (var move in moves)
+        //    {
+        //        // Proveri da li potez ostavlja kralja u šahu
+        //        if (!LeavesKingInCheck(move))
+        //        {
+        //            legalMoves.Add(move);
+        //        }
+        //    }
 
-            return legalMoves;
-        }
+        //    return legalMoves;
+        //}
 
         private bool LeavesKingInCheck(Move move)
         {
@@ -945,6 +1154,49 @@ namespace SimpletonChessEngine
                     {
                         double value = GetPieceValue(Math.Abs(piece));
                         eval += (piece > 0) ? value : -value;
+                    }
+                }
+            }
+
+            // Penalizuj nebranjenje figura
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isWhite = piece > 0;
+                    bool attacked = IsSquareAttacked(file, rank, !isWhite);
+                    bool defended = IsSquareAttacked(file, rank, isWhite);
+
+                    if (attacked && !defended)
+                    {
+                        double value = GetPieceValue(Math.Abs(piece)) * 0.5;
+                        eval += isWhite ? -value : value;
+                        Console.WriteLine($"info string Hanging piece {GetPieceChar(piece)} at {(char)('a' + file)}{rank + 1}");
+                    }
+                }
+            }
+
+            // Kazni ako je visoka figura napadnuta a nije branjenja
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isWhite = piece > 0;
+                    bool attacked = IsSquareAttacked(file, rank, !isWhite);
+                    bool defended = IsSquareAttacked(file, rank, isWhite);
+
+                    // Samo ako je to dama ili top
+                    if (attacked && !defended && (Math.Abs(piece) == Board.WHITE_QUEEN || Math.Abs(piece) == Board.WHITE_ROOK))
+                    {
+                        double value = GetPieceValue(Math.Abs(piece)) * 2.0;
+                        eval += isWhite ? -value : value;
+                        Console.WriteLine($"info string THREAT: {GetPieceChar(piece)} at {(char)('a' + file)}{rank + 1} is attacked and undefended!");
                     }
                 }
             }
@@ -1089,15 +1341,74 @@ namespace SimpletonChessEngine
             pathMemory.Clear();
         }
 
+
+        private bool currentlyApplyingMove = false;
         public void MakeMove(string move)
         {
-            var parsedMove = Move.Parse(move);
-            if (parsedMove != null)
+            if (currentlyApplyingMove) return; // spreči rekurziju
+
+            currentlyApplyingMove = true;
+
+            try
             {
+                Console.WriteLine($"info string Trying to make move: {move}");
+
+                var parsedMove = Move.Parse(move);
+                if (parsedMove == null)
+                {
+                    Console.WriteLine($"info string ERROR: Cannot parse move string: {move}");
+                    return;
+                }
+
+                var legalMoves = GenerateLegalMoves();
+                if (!legalMoves.Any(m => IsSameMove(m, parsedMove)))
+                {
+                    Console.WriteLine($"info string ILLEGAL MOVE attempted: {move}");
+                    return;
+                }
+
                 gameState.MakeMove(parsedMove);
                 constraintNetwork.UpdateAfterMove(parsedMove);
                 pathMemory.RecordMove(parsedMove);
+
+                Console.WriteLine($"info string Move applied: {move}");
             }
+            finally
+            {
+                currentlyApplyingMove = false;
+            }
+        }
+
+
+        public void ApplyMoveWithoutChecks(Move move)
+        {
+            gameState.MakeMove(move);
+            // NE zovemo GenerateLegalMoves
+            // NE zovemo pathMemory
+            // NE zovemo constraintNetwork
+        }
+
+
+        private void SetPositionStateless(PathDependentEngine engine, string[] moves)
+        {
+            engine.NewGame(); // resetuj stanje bez side efekata
+            foreach (string move in moves)
+            {
+                var parsed = Move.Parse(move);
+                if (parsed == null) continue;
+
+                var legal = engine.GenerateLegalMoves();
+                if (!legal.Any(m => IsSameMove(m, parsed))) continue;
+
+                // Ažuriraj gameState direktno bez pozivanja pathMemory i constraint update
+                engine.gameState.MakeMove(parsed);
+                // NEMOJ zvati engine.MakeMove(...) da ne bi ušao u petlju
+            }
+        }
+
+        private bool IsSameMove(Move a, Move b)
+        {
+            return a.From == b.From && a.To == b.To;
         }
 
         public void SetPosition(string fen)
@@ -1112,6 +1423,25 @@ namespace SimpletonChessEngine
             {
                 MakeMove(move);
             }
+        }
+
+        private bool MoveLeadsToMate(Move move)
+        {
+            var tempEngine = new PathDependentEngine();
+            var history = pathMemory.GetRecentMoves(1000).Select(m => m.ToString()).ToArray();
+            var replayMoves = history.Select(Move.Parse).Where(m => m != null).ToList();
+
+            foreach (var past in replayMoves)
+            {
+                tempEngine.ApplyMoveWithoutChecks(past);
+                tempEngine.board = tempEngine.gameState.GetBoard();
+            }
+
+            tempEngine.ApplyMoveWithoutChecks(move);
+            tempEngine.board = tempEngine.gameState.GetBoard();
+
+            var opponentMoves = tempEngine.GenerateLegalMoves();
+            return opponentMoves.Count == 0 && tempEngine.IsKingInCheck(!board.IsWhiteToMove());
         }
     }
 
