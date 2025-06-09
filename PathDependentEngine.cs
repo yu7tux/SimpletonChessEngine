@@ -57,10 +57,17 @@ namespace SimpletonChessEngine
             }
 
             board = gameState.GetBoard();
+
+            bool isWhiteToMove = board.IsWhiteToMove();
+            Console.WriteLine($"info string Side to move: {(isWhiteToMove ? "WHITE" : "BLACK")}");
+
             var legalMoves = GenerateLegalMoves();
+            Console.WriteLine($"info string Generated {legalMoves.Count} legal moves");
+
             if (legalMoves.Count == 0)
             {
-                return "e2e4"; // fallback
+                Console.WriteLine("info string No legal moves available!");
+                return "0000";
             }
 
             var moveEvaluations = new Dictionary<Move, double>();
@@ -69,37 +76,11 @@ namespace SimpletonChessEngine
             {
                 if (shouldStop) break;
 
-                // Prvo brza evaluacija
-                double quickEval = GetBaseMoveEvaluation(move);
+                // Evaluiraj potez sa look-ahead
+                double eval = EvaluateMoveWithLookAhead(move, 2); // 2 polupoteza
+                moveEvaluations[move] = eval;
 
-                // Ako je očigledno loš potez, ne treba dalja analiza
-                if (quickEval < -20.0)
-                {
-                    moveEvaluations[move] = quickEval;
-                    continue;
-                }
-
-                // Za obećavajuće poteze, pogledaj malo unapred
-                double lookAheadEval = SimpleLookAhead(move, 2); // 2 poteza unapred
-
-                // Path-dependent modifikacija
-                var paths = GeneratePathPermutations(move, 2);
-                double pathModifier = 0.0;
-
-                foreach (var path in paths)
-                {
-                    double pathValue = 0.0;
-                    for (int i = 0; i < path.Count; i++)
-                    {
-                        double sign = (i % 2 == 0) ? 1.0 : -1.0;
-                        pathValue += sign * path[i] * 0.01;
-                    }
-                    pathModifier += pathValue;
-                }
-
-                // Kombinuj sve evaluacije
-                double finalEval = quickEval * 0.6 + lookAheadEval * 0.3 + pathModifier / paths.Count * 0.1;
-                moveEvaluations[move] = finalEval;
+                Console.WriteLine($"info string Move {move} eval: {eval:F3}");
             }
 
             if (moveEvaluations.Count == 0)
@@ -121,6 +102,207 @@ namespace SimpletonChessEngine
 
             return bestMove.ToString();
         }
+
+        /// <summary>
+        /// Evaluira potez gledajući unapred
+        /// </summary>
+        private double EvaluateMoveWithLookAhead(Move move, int depth)
+        {
+            string from = move.From;
+            string to = move.To;
+            int fromFile = from[0] - 'a';
+            int fromRank = from[1] - '1';
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
+
+            int movingPiece = board.GetPiece(fromFile, fromRank);
+            int targetPiece = board.GetPiece(toFile, toRank);
+
+            double movingPieceValue = GetPieceValue(Math.Abs(movingPiece));
+            double captureValue = targetPiece != Board.EMPTY ? GetPieceValue(Math.Abs(targetPiece)) : 0.0;
+
+            // Osnovna evaluacija
+            double eval = captureValue * 10.0;
+
+            // KRITIČNO: Proveri šta se dešava nakon našeg poteza
+            double worstResponse = EvaluateOpponentBestResponse(move);
+
+            // Ako gubimo figuru nakon poteza, to je loše!
+            if (worstResponse < -movingPieceValue * 0.8)
+            {
+                Console.WriteLine($"info string {move} loses material: worst response = {worstResponse:F1}");
+                return worstResponse; // Vrati koliko gubimo
+            }
+
+            // Dodaj pozicionu evaluaciju samo ako ne gubimo materijal
+            eval += EvaluatePositionalFactors(move);
+
+            return eval;
+        }
+
+        /// <summary>
+        /// Evaluira pozicione faktore poteza
+        /// </summary>
+        private double EvaluatePositionalFactors(Move move)
+        {
+            double eval = 0.0;
+
+            string from = move.From;
+            string to = move.To;
+            int fromFile = from[0] - 'a';
+            int fromRank = from[1] - '1';
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
+
+            int movingPiece = board.GetPiece(fromFile, fromRank);
+            bool isWhite = movingPiece > 0;
+
+            // Centralizacija
+            if (Math.Abs(movingPiece) != Board.WHITE_PAWN && Math.Abs(movingPiece) != Board.WHITE_KING)
+            {
+                double centerDistance = Math.Max(Math.Abs(toFile - 3.5), Math.Abs(toRank - 3.5));
+                eval += (3.5 - centerDistance) * 0.2;
+            }
+
+            // Pawn advancement
+            if (Math.Abs(movingPiece) == Board.WHITE_PAWN)
+            {
+                if (isWhite)
+                {
+                    eval += (toRank - 1) * 0.15;
+                    if (toRank == 6) eval += 2.0; // Blizu promocije
+                }
+                else
+                {
+                    eval += (6 - toRank) * 0.15;
+                    if (toRank == 1) eval += 2.0; // Blizu promocije
+                }
+            }
+
+            // Razvoj figura u otvaranju
+            if (gameState.GetMoveCount() < 10)
+            {
+                if (Math.Abs(movingPiece) == Board.WHITE_KNIGHT ||
+                    Math.Abs(movingPiece) == Board.WHITE_BISHOP)
+                {
+                    if ((isWhite && fromRank == 0) || (!isWhite && fromRank == 7))
+                    {
+                        eval += 0.5; // Bonus za razvoj
+                    }
+                }
+            }
+
+            return eval;
+        }
+
+        /// <summary>
+        /// Proverava da li saveznik može braniti polje
+        /// </summary>
+        private bool CanAllyDefend(int targetFile, int targetRank, int ignoredFile, int ignoredRank, bool isWhite)
+        {
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    if (file == ignoredFile && rank == ignoredRank) continue;
+
+                    int piece = board.GetPiece(file, rank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isPieceWhite = piece > 0;
+                    if (isPieceWhite != isWhite) continue; // Mora biti saveznik
+
+                    if (CanPieceCapture(file, rank, targetFile, targetRank, Math.Abs(piece)))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Proverava da li je polje bilo branjeno specifičnom figurom
+        /// </summary>
+        private bool WasDefendedBy(int targetFile, int targetRank, int defenderFile, int defenderRank, int defenderType)
+        {
+            return CanPieceCapture(defenderFile, defenderRank, targetFile, targetRank, defenderType);
+        }
+
+
+        /// <summary>
+        /// Evaluira najbolji odgovor protivnika na naš potez
+        /// </summary>
+        private double EvaluateOpponentBestResponse(Move ourMove)
+        {
+            string to = ourMove.To;
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
+
+            string from = ourMove.From;
+            int fromFile = from[0] - 'a';
+            int fromRank = from[1] - '1';
+
+            int movingPiece = board.GetPiece(fromFile, fromRank);
+            double movingPieceValue = GetPieceValue(Math.Abs(movingPiece));
+
+            // Prvo proveri da li nas neko može pojesti na novoj poziciji
+            if (CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank))
+            {
+                // Da li smo branjeni?
+                if (!CanAllyDefend(toFile, toRank, fromFile, fromRank, movingPiece > 0))
+                {
+                    // Gubimo celu figuru!
+                    return -movingPieceValue * 10.0;
+                }
+                else
+                {
+                    // Razmena - proveri da li je dobra
+                    int targetPiece = board.GetPiece(toFile, toRank);
+                    if (targetPiece != Board.EMPTY)
+                    {
+                        double targetValue = GetPieceValue(Math.Abs(targetPiece));
+                        return (targetValue - movingPieceValue) * 10.0; // Razlika u razmeni
+                    }
+                    else
+                    {
+                        return -movingPieceValue * 5.0; // Gubimo za ništa
+                    }
+                }
+            }
+
+            // Proveri da li ovaj potez ostavlja druge naše figure nebranjene
+            double hangingPenalty = 0.0;
+
+            // Posebno proveri da li pomeranje ove figure ostavlja nešto nebranjeno
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    int piece = board.GetPiece(file, rank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isOurPiece = (piece > 0) == (movingPiece > 0);
+                    if (!isOurPiece) continue;
+
+                    // Da li je ova figura bila branjena našom figurom koju pomeramo?
+                    if (WasDefendedBy(file, rank, fromFile, fromRank, Math.Abs(movingPiece)))
+                    {
+                        // Proveri da li će biti napadnuta nakon našeg poteza
+                        if (IsSquareAttacked(file, rank, piece < 0))
+                        {
+                            double pieceValue = GetPieceValue(Math.Abs(piece));
+                            hangingPenalty -= pieceValue * 8.0;
+                            Console.WriteLine($"info string {ourMove} leaves {GetPieceChar(piece)} at {(char)('a' + file)}{rank + 1} hanging!");
+                        }
+                    }
+                }
+            }
+
+            return hangingPenalty;
+        }
+
+
 
         /// <summary>
         /// Jednostavan look-ahead bez pune minimax kompleksnosti
@@ -485,9 +667,10 @@ namespace SimpletonChessEngine
             {
                 case Board.WHITE_PAWN: return 1.0;
                 case Board.WHITE_KNIGHT: return 3.0;
-                case Board.WHITE_BISHOP: return 3.0;
+                case Board.WHITE_BISHOP: return 3.2; // Malo više od skakača
                 case Board.WHITE_ROOK: return 5.0;
                 case Board.WHITE_QUEEN: return 9.0;
+                case Board.WHITE_KING: return 1000.0; // Kralj je neprocenjiv
                 default: return 0.0;
             }
         }
