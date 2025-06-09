@@ -6,9 +6,15 @@ using System.Threading.Tasks;
 
 namespace SimpletonChessEngine
 {
-    public class SimpletonChessEngine
+    public class SimpletonChessEngine : IChessEngine
     {
-        public volatile bool ShouldStop = false;
+        public volatile bool shouldStop = false;
+        public bool ShouldStop
+        {
+            get => shouldStop;
+            set => shouldStop = value;
+        }
+
         private readonly GameState gameState;
         private readonly MoveGenerator moveGenerator;
         private readonly Evaluator evaluator;
@@ -142,9 +148,19 @@ namespace SimpletonChessEngine
             gameState.SetPosition(fen);
         }
 
+        public void SetPosition(string[] moves)
+        {
+            NewGame(); // reset na početnu poziciju
+            foreach (string move in moves)
+            {
+                MakeMove(move);
+            }
+        }
+
         public bool IsGameOver()
         {
             return gameState.IsCheckmate() || gameState.IsStalemate() || gameState.IsDraw();
         }
+
     }
 }

@@ -9,15 +9,14 @@ namespace SimpletonChessEngine
     // UCI Protocol Handler
     public class UCIHandler
     {
-        private readonly SimpletonChessEngine engine;
         private bool debugMode = false;
 
         private CancellationTokenSource searchCancellation;
         private Task searchTask;
-        private volatile bool stopSearch = false;  
+        private volatile bool stopSearch = false;
+        private readonly IChessEngine engine;
 
-
-        public UCIHandler(SimpletonChessEngine engine)
+        public UCIHandler(IChessEngine engine)
         {
             this.engine = engine;
         }
