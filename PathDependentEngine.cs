@@ -63,15 +63,24 @@ namespace SimpletonChessEngine
                 return "e2e4"; // fallback
             }
 
-            // Jednostavnija evaluacija sa path-dependent twist
             var moveEvaluations = new Dictionary<Move, double>();
 
             foreach (var move in legalMoves)
             {
                 if (shouldStop) break;
 
-                // Osnovna evaluacija poteza
-                double baseEval = GetBaseMoveEvaluation(move);
+                // Prvo brza evaluacija
+                double quickEval = GetBaseMoveEvaluation(move);
+
+                // Ako je očigledno loš potez, ne treba dalja analiza
+                if (quickEval < -20.0)
+                {
+                    moveEvaluations[move] = quickEval;
+                    continue;
+                }
+
+                // Za obećavajuće poteze, pogledaj malo unapred
+                double lookAheadEval = SimpleLookAhead(move, 2); // 2 poteza unapred
 
                 // Path-dependent modifikacija
                 var paths = GeneratePathPermutations(move, 2);
@@ -88,11 +97,11 @@ namespace SimpletonChessEngine
                     pathModifier += pathValue;
                 }
 
-                double finalEval = baseEval + pathModifier / paths.Count;
+                // Kombinuj sve evaluacije
+                double finalEval = quickEval * 0.6 + lookAheadEval * 0.3 + pathModifier / paths.Count * 0.1;
                 moveEvaluations[move] = finalEval;
             }
 
-            // Odaberi najbolji potez
             if (moveEvaluations.Count == 0)
             {
                 return legalMoves[0].ToString();
@@ -111,6 +120,42 @@ namespace SimpletonChessEngine
             Console.WriteLine($"info string Best move: {bestMove}");
 
             return bestMove.ToString();
+        }
+
+        /// <summary>
+        /// Jednostavan look-ahead bez pune minimax kompleksnosti
+        /// </summary>
+        private double SimpleLookAhead(Move move, int depth)
+        {
+            if (depth <= 0) return 0.0;
+
+            // Simuliraj potez logički (bez menjanja board-a)
+            string to = move.To;
+            int toFile = to[0] - 'a';
+            int toRank = to[1] - '1';
+            int capturedPiece = board.GetPiece(toFile, toRank);
+
+            double eval = 0.0;
+
+            // Ako je capture, dodaj vrednost
+            if (capturedPiece != Board.EMPTY)
+            {
+                eval += GetPieceValue(Math.Abs(capturedPiece));
+            }
+
+            // Proveri da li protivnik može da uzme našu figuru nakon ovog poteza
+            if (CanOpponentCaptureOn(toFile, toRank, -1, -1)) // -1,-1 znači ne ignoriši ništa
+            {
+                string from = move.From;
+                int fromFile = from[0] - 'a';
+                int fromRank = from[1] - '1';
+                int movingPiece = board.GetPiece(fromFile, fromRank);
+
+                // Oduzmi vrednost naše figure ako može biti pojedena
+                eval -= GetPieceValue(Math.Abs(movingPiece)) * 0.9; // 0.9 jer možda možemo da uzmemo njihovu
+            }
+
+            return eval;
         }
 
         /// <summary>
@@ -280,16 +325,42 @@ namespace SimpletonChessEngine
 
             int movingPiece = board.GetPiece(fromFile, fromRank);
             int targetPiece = board.GetPiece(toFile, toRank);
+            double movingPieceValue = GetPieceValue(Math.Abs(movingPiece));
 
-            // Debug info
-            Console.WriteLine($"info string Evaluating {move}: piece {movingPiece} to square with {targetPiece}");
+            // KRITIČNO: Proveri da li će figura biti pojedena
+            bool isSquareSafe = !CanOpponentCaptureOn(toFile, toRank, fromFile, fromRank);
 
-            // CAPTURE BONUS - najvažnije!
+            if (!isSquareSafe)
+            {
+                // Polje je napadnuto!
+                if (targetPiece == Board.EMPTY)
+                {
+                    // Pomeramo figuru na napadnuto prazno polje - LOŠE!
+                    Console.WriteLine($"info string WARNING: {move} moves {GetPieceChar(movingPiece)} to attacked square!");
+                    eval -= movingPieceValue * 50.0;
+                    return eval; // Odmah vrati
+                }
+                else
+                {
+                    // Razmena - proveri da li je dobra
+                    double captureValue = GetPieceValue(Math.Abs(targetPiece));
+                    if (captureValue < movingPieceValue)
+                    {
+                        // Loša razmena (dama za skakača, etc.)
+                        double loss = movingPieceValue - captureValue;
+                        Console.WriteLine($"info string BAD TRADE: {move} loses {loss} material!");
+                        eval -= loss * 50.0;
+                        return eval;
+                    }
+                }
+            }
+
+            // CAPTURE BONUS
             if (targetPiece != Board.EMPTY)
             {
                 double captureValue = GetPieceValue(Math.Abs(targetPiece));
                 eval += captureValue * 10.0;
-                Console.WriteLine($"info string   Capture bonus: +{captureValue * 10.0}");
+                Console.WriteLine($"info string {move} captures piece worth {captureValue}");
             }
 
             // Centralizacija
@@ -304,13 +375,13 @@ namespace SimpletonChessEngine
             }
             eval += centerBonus;
 
-            // Razvitak figura (ne pešaci)
+            // Razvitak
             if (Math.Abs(movingPiece) != Board.WHITE_PAWN)
             {
                 bool isWhite = movingPiece > 0;
                 if ((isWhite && fromRank == 0) || (!isWhite && fromRank == 7))
                 {
-                    eval += 0.4; // Bonus za razvitak
+                    eval += 0.4;
                 }
             }
 
@@ -328,12 +399,84 @@ namespace SimpletonChessEngine
                 }
             }
 
-            // Random factor - VRLO MALI
+            // Random - minimalan
             eval += (random.NextDouble() - 0.5) * 0.02;
 
-            Console.WriteLine($"info string   Total eval for {move}: {eval:F3}");
-
             return eval;
+        }
+
+        /// <summary>
+        /// Proverava da li protivnik može da pojede figuru na datom polju
+        /// </summary>
+        private bool CanOpponentCaptureOn(int targetFile, int targetRank, int ignoredFile, int ignoredRank)
+        {
+            bool isWhiteToMove = board.IsWhiteToMove();
+
+            // Proveri sve protivničke figure
+            for (int rank = 0; rank < 8; rank++)
+            {
+                for (int file = 0; file < 8; file++)
+                {
+                    // Ignoriši figuru koju pomeramo
+                    if (file == ignoredFile && rank == ignoredRank) continue;
+
+                    int piece = board.GetPiece(file, rank);
+                    if (piece == Board.EMPTY) continue;
+
+                    bool isPieceWhite = piece > 0;
+                    // Gledamo protivničke figure
+                    if (isPieceWhite == isWhiteToMove) continue;
+
+                    // Proveri da li ova figura može napasti target polje
+                    if (CanPieceCapture(file, rank, targetFile, targetRank, Math.Abs(piece)))
+                    {
+                        Console.WriteLine($"info string Square {(char)('a' + targetFile)}{targetRank + 1} can be captured by {GetPieceChar(piece)} at {(char)('a' + file)}{rank + 1}");
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Proverava da li figura može da capture na datom polju
+        /// </summary>
+        private bool CanPieceCapture(int fromFile, int fromRank, int toFile, int toRank, int pieceType)
+        {
+            int df = toFile - fromFile;
+            int dr = toRank - fromRank;
+
+            switch (pieceType)
+            {
+                case Board.WHITE_PAWN:
+                    // Pešak napada dijagonalno
+                    bool isWhite = board.GetPiece(fromFile, fromRank) > 0;
+                    int pawnDir = isWhite ? 1 : -1;
+                    return Math.Abs(df) == 1 && dr == pawnDir;
+
+                case Board.WHITE_KNIGHT:
+                    return (Math.Abs(df) == 2 && Math.Abs(dr) == 1) ||
+                           (Math.Abs(df) == 1 && Math.Abs(dr) == 2);
+
+                case Board.WHITE_BISHOP:
+                    if (Math.Abs(df) != Math.Abs(dr)) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_ROOK:
+                    if (df != 0 && dr != 0) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_QUEEN:
+                    if (df != 0 && dr != 0 && Math.Abs(df) != Math.Abs(dr)) return false;
+                    return IsPathClear(fromFile, fromRank, toFile, toRank);
+
+                case Board.WHITE_KING:
+                    return Math.Abs(df) <= 1 && Math.Abs(dr) <= 1;
+
+                default:
+                    return false;
+            }
         }
 
         private double GetPieceValue(int pieceType)
